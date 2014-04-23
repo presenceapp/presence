@@ -23,7 +23,7 @@
 
      "autoload": {
          "psr-0": {
-             "Teamavailabilities": "src/"
+             "Presence": "src/"
              },
          "files": [
              "vendor/google-api-php-client/src/Google_Client.php",
@@ -44,11 +44,12 @@
         }
     ],
     "require": {
-        "silex/silex": "1.0.*@dev",
+        "silex/silex": "1.2.*@dev",
         "twig/twig": ">=1.8,<2.0-dev",
         "google-api-php-client": "0.6.x",
         "symfony/yaml": "v2.2.0",
-        "symfony/debug": "~2.3"
+        "symfony/security": "~2.3",
+        "gigablah/silex-oauth": "~0.1"
     },
 
     "require-dev": {

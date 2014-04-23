@@ -1,6 +1,6 @@
 <?php
 
-namespace Teamavailabilities;
+namespace Presence;
 
 // we need APC for the caching
 if (! (extension_loaded('apc') && ini_get('apc.enabled'))) {
@@ -24,16 +24,75 @@ $app['twig']->getExtension('core')->setTimezone(
     isset($settings['timezone']) ? $settings['timezone']:'Europe/Zurich'
 );
 
+Oauth::register($app, $config->settings);
+
 /**
  * List with all teams
  */
 $app->get(
     '/',
     function () use ($app, $config) {
-        return $app['twig']->render('index.twig', array('teams' => $config->people['teams']));
+        ksort($config->people['persons']);
+
+        return $app['twig']->render(
+            'index.twig',
+            array(
+                'teams'   => $config->people['teams'],
+                'persons' => $config->people['persons'],
+            )
+        );
     }
 )
 ->bind('homepage');
+
+$app->get(
+    '/search/people',
+    function () use ($app, $config) {
+        $query = strtolower($app['request']->get('q'));
+        $result = array();
+        if (!empty($query)) {
+            $persons = $config->people['persons'];
+
+            $result = array_filter(
+                $persons,
+                function ($array) use ($query, &$persons) {
+                    $len = strlen($query);
+
+                    $name_spl = explode(" ", trim(strtolower($array['name'])));
+
+                    foreach ($name_spl as $name) {
+                        if (substr($name, 0, $len) == $query) {
+                            return true;
+                        }
+                    }
+
+                    $mail_spl = explode(".", trim(strtolower($array['mail'])));
+
+                    foreach ($name_spl as $name) {
+                        if (substr($name, 0, $len) == $query) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+            );
+        }
+        return $app->json($result);
+    }
+)
+->bind("peoplesearch");
+
+/**
+ * Instruction
+ */
+$app->get(
+    '/instruction',
+    function () use ($app) {
+        return $app['twig']->render('instruction.twig');
+    }
+)
+->bind('instruction');
 
 /**
  * Get team availabilities
@@ -46,18 +105,30 @@ $app->get(
 
             $config->people['refresh'] = $app['request']->get('refresh');
 
-            $helper      = new DateHelper();
-            $startDate   = $helper->getStartDate($app['request']->get('week'));
-            $weeks       = $app['request']->get('view', 1);
-            $showDetails = $app['request']->get('details', 1);
-            $endDate     = $helper->getEndDate($weeks);
-            $days        = $helper->getDays($startDate, $endDate);
+            $helper       = new DateHelper();
+            $projectsMode = ($app['request']->get('mode', 'availability') === 'projects');
+            $startDate    = $helper->getStartDate($app['request']->get('week'));
+            $weeks        = $app['request']->get('view', 1);
+            $showDetails  = $app['request']->get('details', 1);
+            $endDate      = $helper->getEndDate($weeks);
+            $days         = $helper->getDays($startDate, $endDate);
+            $calendar     = new GoogleCalendar($config->settings['google'], $startDate, $endDate);
 
-            $team = new Team(
-                $teamId,
-                $config->people,
-                new GoogleCalendar($config->settings['google'], $startDate, $endDate)
-            );
+            if (!empty($config->people['teams'][$teamId])) {
+                $team = new Team(
+                    $teamId,
+                    $config->people,
+                    $calendar
+                );
+            } elseif (!empty($config->people['persons'][$teamId])) {
+                $team = new TeamOfOne(
+                    $teamId,
+                    $config->people,
+                    $calendar
+                );
+            } else {
+                $app->abort(404, 'No team or person found with ID ' . $teamId . ' does not exist');
+            }
 
         } catch (\Exception $e) {
             $app->abort(404, $e->getMessage());
@@ -65,13 +136,14 @@ $app->get(
 
         // render the twig template, the team object with the members and their events is passed
         return $app['twig']->render(
-            'availabilities.twig',
+          (($projectsMode) ? 'projects' : 'availabilities' ). '.twig',
             array(
                 'teams'               => $config->people['teams'],
                 'team'                => $team,
                 'days'                => $days,
-                'weeks'             => $weeks,
+                'weeks'               => $weeks,
                 'showDetails'         => $showDetails,
+                'projectsMode'        => $projectsMode,
                 'serviceAccountEmail' => $config->settings['google']['serviceAccountName']
             )
         );
